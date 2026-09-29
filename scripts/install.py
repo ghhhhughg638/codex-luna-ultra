@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a local Luna Ultra profile without publishing or replacing Codex state."""
+"""Install a local Luna Ultra profile without modifying base Codex settings."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE_TEMPLATE = ROOT / "profiles" / "luna-ultra.config.toml"
 CATALOG_NAME = "luna-ultra-models.json"
 PROFILE_NAME = "luna-ultra.config.toml"
-ULTRA_DESCRIPTION = "Maximum reasoning with automatic task delegation"
+ULTRA_DESCRIPTION = "Maximum reasoning with configured multi-agent support"
 
 
 class InstallError(Exception):
@@ -43,6 +45,16 @@ def clean_cli_environment(codex_home: Path) -> dict[str, str]:
         "SHELL",
         "USER",
         "LOGNAME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
     }
     env = {key: value for key, value in os.environ.items() if key in allowed_exact}
     env["CODEX_HOME"] = str(codex_home)
@@ -64,6 +76,8 @@ def read_catalog(codex: str) -> dict:
             )
         except subprocess.TimeoutExpired as exc:
             raise InstallError("Codex catalog query timed out; no files were written.") from exc
+        except OSError as exc:
+            raise InstallError(f"Could not run Codex catalog query: {exc}; no files were written.") from exc
         if result.returncode != 0:
             raise InstallError(
                 f"Codex catalog query failed (exit {result.returncode}); no files were written."
@@ -81,7 +95,11 @@ def add_luna_ultra(catalog: dict) -> dict:
         raise InstallError("Catalog has no model list; no files were written.")
 
     slugs = [model.get("slug") for model in models if isinstance(model, dict)]
-    if len(slugs) != len(models) or len(set(slugs)) != len(slugs):
+    if (
+        len(slugs) != len(models)
+        or any(not isinstance(slug, str) or not slug for slug in slugs)
+        or len(set(slugs)) != len(slugs)
+    ):
         raise InstallError("Catalog model entries are invalid or duplicated; no files were written.")
 
     luna_matches = [model for model in models if model.get("slug") == "gpt-6-luna"]
@@ -95,18 +113,27 @@ def add_luna_ultra(catalog: dict) -> dict:
     if not isinstance(levels, list):
         raise InstallError("Luna reasoning levels are missing; no files were written.")
     efforts = [level.get("effort") for level in levels if isinstance(level, dict)]
-    if len(efforts) != len(levels) or len(set(efforts)) != len(efforts) or "max" not in efforts:
+    if (
+        len(efforts) != len(levels)
+        or any(not isinstance(effort, str) or not effort for effort in efforts)
+        or len(set(efforts)) != len(efforts)
+        or "max" not in efforts
+    ):
         raise InstallError("Luna reasoning levels are invalid or do not advertise max; no files were written.")
 
     ultra = next((level for level in levels if level.get("effort") == "ultra"), None)
+    created_ultra = ultra is None
     if ultra is None:
         ultra = {"effort": "ultra", "description": ULTRA_DESCRIPTION}
-        max_index = efforts.index("max")
-        levels.insert(max_index + 1, ultra)
     else:
-        ultra["description"] = ULTRA_DESCRIPTION
+        levels.remove(ultra)
+    max_index = next(index for index, level in enumerate(levels) if level["effort"] == "max")
+    levels.insert(max_index + 1, ultra)
 
-    luna["multi_agent_reasoning_effort"] = "max"
+    if created_ultra:
+        luna["multi_agent_reasoning_effort"] = "max"
+    else:
+        luna.setdefault("multi_agent_reasoning_effort", "max")
     return catalog
 
 
@@ -129,6 +156,8 @@ def verify_profile(profile_text: str, catalog_text: str, codex: str) -> None:
             )
         except subprocess.TimeoutExpired as exc:
             raise InstallError("Profile validation timed out; no files were written.") from exc
+        except OSError as exc:
+            raise InstallError(f"Could not run Codex profile validation: {exc}; no files were written.") from exc
         if result.returncode != 0:
             raise InstallError(
                 f"Codex rejected the generated profile (exit {result.returncode}); no files were written."
@@ -145,11 +174,17 @@ def stage_file(path: Path, content: bytes) -> Path:
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as stream:
+            fd = -1
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
         return temp_path
     except BaseException:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             temp_path.unlink(missing_ok=True)
         except OSError:
@@ -166,7 +201,6 @@ def transactional_write(files: dict[Path, bytes], force: bool) -> list[tuple[Pat
             staged[target] = stage_file(target, content)
         if force:
             backups = backup_existing(list(files))
-        backup_by_target = dict(backups)
         for target, temp_path in staged.items():
             if target.exists() and not force:
                 raise InstallError(f"Target appeared during installation: {target}")
@@ -177,6 +211,7 @@ def transactional_write(files: dict[Path, bytes], force: bool) -> list[tuple[Pat
             os.chmod(target, 0o600)
         return backups
     except BaseException:
+        rollback_errors = []
         for target in reversed(replaced):
             backup = dict(backups).get(target)
             try:
@@ -186,9 +221,14 @@ def transactional_write(files: dict[Path, bytes], force: bool) -> list[tuple[Pat
                     os.chmod(target, 0o600)
                 else:
                     target.unlink(missing_ok=True)
-            except OSError:
-                # Preserve the original exception; the backup remains available for manual recovery.
-                pass
+            except OSError as exc:
+                rollback_errors.append(f"{target}: {exc}")
+        if rollback_errors:
+            backup_paths = ", ".join(str(path) for _, path in backups)
+            raise InstallError(
+                "Installation failed and rollback was incomplete. "
+                f"Recovery backups are at: {backup_paths}. Errors: {'; '.join(rollback_errors)}"
+            )
         raise
     finally:
         for temp_path in staged.values():
@@ -199,19 +239,52 @@ def transactional_write(files: dict[Path, bytes], force: bool) -> list[tuple[Pat
 
 
 def backup_existing(paths: list[Path]) -> list[tuple[Path, Path]]:
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backups = []
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    prepared: list[tuple[Path, Path]] = []
     for path in paths:
-        if not path.exists():
+        if not path.exists() and not path.is_symlink():
             continue
         if path.is_symlink() or not path.is_file():
             raise InstallError(f"Refusing to replace a non-regular target: {path}")
-        backup = path.with_name(f"{path.name}.{stamp}.bak")
-        if backup.exists() or backup.is_symlink():
-            raise InstallError(f"Backup path already exists: {backup}")
-        shutil.copyfile(path, backup)
-        os.chmod(backup, 0o600)
-        backups.append((path, backup))
+        backup = path.with_name(f"{path.name}.{stamp}-{secrets.token_hex(4)}.bak")
+        prepared.append((path, backup))
+
+    backups = []
+    try:
+        for path, backup in prepared:
+            source_flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            source_flags |= getattr(os, "O_NOFOLLOW", 0)
+            source_fd = -1
+            backup_fd = -1
+            try:
+                source_fd = os.open(path, source_flags)
+                if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+                    raise InstallError(f"Refusing to back up a non-regular target: {path}")
+                backup_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                backup_flags |= getattr(os, "O_NOFOLLOW", 0)
+                backup_fd = os.open(backup, backup_flags, 0o600)
+                backups.append((path, backup))
+                source = os.fdopen(source_fd, "rb")
+                source_fd = -1
+                destination = os.fdopen(backup_fd, "wb")
+                backup_fd = -1
+                with source, destination:
+                    shutil.copyfileobj(source, destination)
+                    destination.flush()
+                    os.fsync(destination.fileno())
+                os.chmod(backup, 0o600)
+            finally:
+                if source_fd >= 0:
+                    os.close(source_fd)
+                if backup_fd >= 0:
+                    os.close(backup_fd)
+    except BaseException:
+        for _, backup in backups:
+            try:
+                backup.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
     return backups
 
 
@@ -292,4 +365,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except InstallError as exc:
         print(f"install: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except OSError as exc:
+        print(f"install: filesystem or process error: {exc}", file=sys.stderr)
         raise SystemExit(1)

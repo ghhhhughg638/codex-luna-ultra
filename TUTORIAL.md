@@ -6,9 +6,9 @@ This guide is intentionally bilingual. It installs the local profile and catalog
 
 ## 1. Prerequisites / 前置依赖
 
-Install or configure Codex CLI first. The account/provider must already have access to GPT-6-Luna. The repository cannot provide a model, account, provider, or login.
+Install or configure Codex CLI first. Generating the local files does not make a model request; using Luna after installation requires provider access and authentication. The repository cannot provide a model, account, provider, or login.
 
-先安装并配置 Codex CLI。账号和服务商必须已经有 GPT-6-Luna 访问权。本仓库不会提供模型、账号、服务商或登录凭据。
+先安装并配置 Codex CLI。生成本地文件不会发起模型请求；安装后实际使用 Luna 需要服务商访问权和认证。本仓库不会提供模型、账号、服务商或登录凭据。
 
 Use the official Codex documentation for platform-specific installation and login:
 
@@ -36,7 +36,7 @@ git clone https://github.com/ghhhhughg638/codex-luna-ultra.git
 cd codex-luna-ultra
 ```
 
-没有 Git 时也可以下载 GitHub ZIP 后进入解压目录。
+Without Git, use the repository page's **Code → Download ZIP**, extract it, then enter the extracted `codex-luna-ultra` directory. / 没有 Git 时，可在仓库页面选择 **Code → Download ZIP**，解压后进入 `codex-luna-ultra` 目录。
 
 ## 3. Preview, then install / 先预览再安装
 
@@ -102,25 +102,48 @@ The installer deliberately does not overwrite your global instructions. To use t
 安装器不会覆盖全局指令。要全局使用附带的辩论规则，请先审阅，再备份已有文件并合并到 `$CODEX_HOME/AGENTS.md`，避免重复追加。项目内的 `AGENTS.md` 只影响该项目。
 
 ```sh
-codex_home="${CODEX_HOME:-$HOME/.codex}"
-mkdir -p "$codex_home"
-if [ -f "$codex_home/AGENTS.md" ]; then
-  backup="$codex_home/AGENTS.md.$(date -u +%Y%m%dT%H%M%SZ).bak"
-  cp "$codex_home/AGENTS.md" "$backup"
-  printf 'Backed up existing AGENTS.md to %s\n' "$backup"
+set -eu
+if [ "${CODEX_HOME+x}" = x ] && [ -z "$CODEX_HOME" ]; then
+  printf 'CODEX_HOME must not be empty.\n' >&2
+  exit 1
 fi
+codex_home="${CODEX_HOME:-$HOME/.codex}"
+case "$codex_home" in
+  /*) ;;
+  *) printf 'CODEX_HOME must be an absolute path.\n' >&2; exit 1 ;;
+esac
+if [ -L "$codex_home" ] || [ -L "$codex_home/AGENTS.md" ]; then
+  printf 'Refusing to modify a symbolic-link Codex home or AGENTS.md.\n' >&2
+  exit 1
+fi
+mkdir -p "$codex_home"
 marker_begin='# >>> codex-luna-ultra AGENTS BEGIN >>>'
 marker_end='# <<< codex-luna-ultra AGENTS END <<<'
 touch "$codex_home/AGENTS.md"
-if grep -Fq "$marker_begin" "$codex_home/AGENTS.md"; then
+begin_count=$(grep -Fxc "$marker_begin" "$codex_home/AGENTS.md" || true)
+end_count=$(grep -Fxc "$marker_end" "$codex_home/AGENTS.md" || true)
+if [ "$begin_count" -eq 1 ] && [ "$end_count" -eq 1 ]; then
   printf 'Luna Ultra deliberation rules are already present; no duplicate append.\n'
-else
-  {
-    printf '%s\n' "$marker_begin"
-    cat AGENTS.md
-    printf '%s\n' "$marker_end"
-  } >> "$codex_home/AGENTS.md"
+  exit 0
+elif [ "$begin_count" -ne 0 ] || [ "$end_count" -ne 0 ]; then
+  printf 'Found an incomplete or duplicate managed section; repair AGENTS.md manually.\n' >&2
+  exit 1
 fi
+if [ -f "$codex_home/AGENTS.md" ] && [ -s "$codex_home/AGENTS.md" ]; then
+  backup="$codex_home/AGENTS.md.$(date -u +%Y%m%dT%H%M%SZ).bak"
+  if [ -e "$backup" ] || [ -L "$backup" ]; then
+    printf 'Backup already exists: %s\n' "$backup" >&2
+    exit 1
+  fi
+  cp "$codex_home/AGENTS.md" "$backup"
+  chmod 600 "$backup"
+  printf 'Backed up existing AGENTS.md to %s\n' "$backup"
+fi
+{
+  printf '%s\n' "$marker_begin"
+  cat AGENTS.md
+  printf '%s\n' "$marker_end"
+} >> "$codex_home/AGENTS.md"
 ```
 
 Review and deduplicate the file after merging. The policy asks for 10–12 distinct agents when capacity permits, purposeful multi-round debate, and up to 20 configured threads; runtime/account slots still control actual concurrency.
@@ -166,3 +189,12 @@ For a forced update, list the timestamped `.bak` files and restore the desired p
 The project adds a local catalog option and reusable instructions. It does not create model access, provider capabilities, credentials, guaranteed cache hits, or guaranteed 20-agent concurrency.
 
 本项目添加本地目录选项和可复用指令，不会创建模型访问权、服务商能力、凭据，也不保证缓存命中或 20 个代理并发。
+
+## 9. Run regression checks / 运行回归检查
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 -m py_compile scripts/install.py scripts/check_dependencies.py
+```
+
+这组测试仅使用 Python 标准库和临时目录，不会写入真实 `$CODEX_HOME`。

@@ -14,11 +14,15 @@ Install or configure Codex CLI from the official documentation first:
 | Codex CLI | A version that provides `codex debug models`, `debug prompt-input`, and a Luna entry with `multi_agent_version = "v2"` and `max` | Supplies the local model catalog and loads the profile / 提供本地模型目录并加载 profile |
 | Python | Python 3.9 or newer | Runs the installer; it uses only the standard library / 运行安装器，仅使用标准库 |
 | Shell | POSIX-compatible shell for the documented commands | Runs the examples / 执行教程命令 |
-| Provider access | An account/provider that already has GPT-6-Luna access and authentication | The repository cannot grant model access / 仓库不能授予模型访问权 |
+| Provider access for model use | An account/provider that already has GPT-6-Luna access and authentication | Needed to run model requests, not to generate the local files / 调用模型时需要，生成本地文件不需要 |
 
 `requirements.txt` is intentionally empty of third-party packages. No `pip install` step is needed.
 
 `requirements.txt` 没有第三方包，故不需要执行 `pip install`。
+
+The installer currently supports POSIX environments (Linux, macOS, Termux, and WSL2). Native Windows PowerShell is not supported; use WSL2 for the installer.
+
+安装器目前支持 POSIX 环境（Linux、macOS、Termux 和 WSL2）。暂不支持原生 Windows PowerShell；Windows 用户请使用 WSL2。
 
 ## Optional / 可选
 
@@ -27,9 +31,9 @@ Install or configure Codex CLI from the official documentation first:
 
 ## Not included / 不包含
 
-This project does not ship the Codex CLI binary, GPT-6-Luna model weights, a provider endpoint, API keys, authentication, session state, or a generated model catalog. The catalog is generated locally so it matches the user's installed Codex version and remains private.
+This project does not ship the Codex CLI binary, GPT-6-Luna model weights, a provider endpoint, API keys, authentication, session state, or a generated model catalog. The catalog is generated locally so it matches the user's installed Codex version and remains private. Provider access and authentication are required to run Luna requests, not to generate the local profile/catalog.
 
-本项目不包含 Codex CLI 二进制、GPT-6-Luna 模型权重、服务商地址、API 密钥、认证信息、会话状态或生成后的模型目录。目录会在用户本机生成，以匹配安装的 Codex 版本并保持私密。
+本项目不包含 Codex CLI 二进制、GPT-6-Luna 模型权重、服务商地址、API 密钥、认证信息、会话状态或生成后的模型目录。目录会在用户本机生成，以匹配安装的 Codex 版本并保持私密。调用 Luna 请求需要服务商访问权和认证；生成本地 profile/目录不需要。
 
 ## Compatibility check / 兼容性检查
 

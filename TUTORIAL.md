@@ -102,7 +102,18 @@ if [ -f "$codex_home/AGENTS.md" ]; then
   cp "$codex_home/AGENTS.md" "$backup"
   printf 'Backed up existing AGENTS.md to %s\n' "$backup"
 fi
-cat AGENTS.md >> "$codex_home/AGENTS.md"
+marker_begin='# >>> codex-luna-ultra AGENTS BEGIN >>>'
+marker_end='# <<< codex-luna-ultra AGENTS END <<<'
+touch "$codex_home/AGENTS.md"
+if grep -Fq "$marker_begin" "$codex_home/AGENTS.md"; then
+  printf 'Luna Ultra deliberation rules are already present; no duplicate append.\n'
+else
+  {
+    printf '%s\n' "$marker_begin"
+    cat AGENTS.md
+    printf '%s\n' "$marker_end"
+  } >> "$codex_home/AGENTS.md"
+fi
 ```
 
 Review and deduplicate the file after merging. The policy asks for 10–12 distinct agents when capacity permits, purposeful multi-round debate, and up to 20 configured threads; runtime/account slots still control actual concurrency.

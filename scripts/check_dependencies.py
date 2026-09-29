@@ -22,16 +22,22 @@ def main() -> int:
     codex = shutil.which("codex")
     if not codex:
         return fail("codex was not found on PATH.")
-    version = subprocess.run(
-        [codex, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False
-    )
+    try:
+        version = subprocess.run(
+            [codex, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False, timeout=30
+        )
+    except subprocess.TimeoutExpired:
+        return fail("codex --version timed out.")
     if version.returncode != 0:
         return fail("codex --version failed.")
     print(f"Codex: {version.stdout.strip() or 'version unavailable'}")
 
-    catalog = subprocess.run(
-        [codex, "debug", "models"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False
-    )
+    try:
+        catalog = subprocess.run(
+            [codex, "debug", "models"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, timeout=120
+        )
+    except subprocess.TimeoutExpired:
+        return fail("codex debug models timed out.")
     if catalog.returncode != 0:
         return fail("codex debug models failed; check Codex setup and provider access.")
     try:

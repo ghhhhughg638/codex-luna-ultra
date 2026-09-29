@@ -1,0 +1,21 @@
+# Generated local model catalog contains Codex-owned model instructions.
+luna-ultra-models.json
+*.generated.json
+
+# Local Codex state and credentials.
+auth.json
+history.jsonl
+sessions/
+state_*.sqlite*
+thread_history_*.sqlite*
+logs_*.sqlite*
+queue_*.sqlite*
+memories_*.sqlite*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+*.log
+tmp/
+.codex/

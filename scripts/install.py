@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Install a local Luna Ultra profile without publishing or replacing Codex state."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PROFILE_TEMPLATE = ROOT / "profiles" / "luna-ultra.config.toml"
+CATALOG_NAME = "luna-ultra-models.json"
+PROFILE_NAME = "luna-ultra.config.toml"
+ULTRA_DESCRIPTION = "Maximum reasoning with automatic task delegation"
+
+
+class InstallError(Exception):
+    pass
+
+
+def clean_cli_environment(codex_home: Path) -> dict[str, str]:
+    """Keep platform runtime variables but avoid forwarding credentials to Codex."""
+    allowed_exact = {
+        "HOME",
+        "PATH",
+        "PREFIX",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LC_ALL",
+        "TERMUX_VERSION",
+        "ANDROID_DATA",
+        "ANDROID_ROOT",
+        "LD_LIBRARY_PATH",
+        "SHELL",
+        "USER",
+        "LOGNAME",
+    }
+    env = {key: value for key, value in os.environ.items() if key in allowed_exact}
+    env["CODEX_HOME"] = str(codex_home)
+    return env
+
+
+def read_catalog(codex: str) -> dict:
+    with tempfile.TemporaryDirectory(prefix="codex-luna-ultra-source-") as temp:
+        isolated_home = Path(temp) / "codex-home"
+        isolated_home.mkdir(mode=0o700)
+        try:
+            result = subprocess.run(
+                [codex, "debug", "models"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=clean_cli_environment(isolated_home),
+                timeout=180,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise InstallError("Codex catalog query timed out; no files were written.") from exc
+        if result.returncode != 0:
+            raise InstallError(
+                f"Codex catalog query failed (exit {result.returncode}); no files were written."
+            )
+        try:
+            catalog = json.loads(result.stdout)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise InstallError("Codex returned an unexpected catalog format; no files were written.") from exc
+    return catalog
+
+
+def add_luna_ultra(catalog: dict) -> dict:
+    models = catalog.get("models") if isinstance(catalog, dict) else None
+    if not isinstance(models, list) or not models:
+        raise InstallError("Catalog has no model list; no files were written.")
+
+    slugs = [model.get("slug") for model in models if isinstance(model, dict)]
+    if len(slugs) != len(models) or len(set(slugs)) != len(slugs):
+        raise InstallError("Catalog model entries are invalid or duplicated; no files were written.")
+
+    luna_matches = [model for model in models if model.get("slug") == "gpt-6-luna"]
+    if len(luna_matches) != 1:
+        raise InstallError("Catalog must contain exactly one gpt-6-luna model; no files were written.")
+    luna = luna_matches[0]
+    if luna.get("multi_agent_version") != "v2":
+        raise InstallError("This Codex catalog does not advertise Luna multi-agent v2; no files were written.")
+
+    levels = luna.get("supported_reasoning_levels")
+    if not isinstance(levels, list):
+        raise InstallError("Luna reasoning levels are missing; no files were written.")
+    efforts = [level.get("effort") for level in levels if isinstance(level, dict)]
+    if len(efforts) != len(levels) or len(set(efforts)) != len(efforts) or "max" not in efforts:
+        raise InstallError("Luna reasoning levels are invalid or do not advertise max; no files were written.")
+
+    ultra = next((level for level in levels if level.get("effort") == "ultra"), None)
+    if ultra is None:
+        ultra = {"effort": "ultra", "description": ULTRA_DESCRIPTION}
+        max_index = efforts.index("max")
+        levels.insert(max_index + 1, ultra)
+    else:
+        ultra["description"] = ULTRA_DESCRIPTION
+
+    luna["multi_agent_reasoning_effort"] = "max"
+    return catalog
+
+
+def verify_profile(profile_text: str, catalog_text: str, codex: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="codex-luna-ultra-verify-") as temp:
+        home = Path(temp) / "codex-home"
+        home.mkdir(mode=0o700)
+        (home / CATALOG_NAME).write_text(catalog_text, encoding="utf-8")
+        (home / PROFILE_NAME).write_text(profile_text, encoding="utf-8")
+        os.chmod(home / CATALOG_NAME, 0o600)
+        os.chmod(home / PROFILE_NAME, 0o600)
+        try:
+            result = subprocess.run(
+                [codex, "--profile", "luna-ultra", "debug", "prompt-input", "catalog profile validation"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=clean_cli_environment(home),
+                timeout=180,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise InstallError("Profile validation timed out; no files were written.") from exc
+        if result.returncode != 0:
+            raise InstallError(
+                f"Codex rejected the generated profile (exit {result.returncode}); no files were written."
+            ) from None
+        try:
+            json.loads(result.stdout)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise InstallError("Profile validation returned unexpected output; no files were written.") from exc
+
+
+def stage_file(path: Path, content: bytes) -> Path:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return temp_path
+    except BaseException:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def transactional_write(files: dict[Path, bytes], force: bool) -> list[tuple[Path, Path]]:
+    staged: dict[Path, Path] = {}
+    replaced: list[Path] = []
+    backups: list[tuple[Path, Path]] = []
+    try:
+        for target, content in files.items():
+            staged[target] = stage_file(target, content)
+        if force:
+            backups = backup_existing(list(files))
+        backup_by_target = dict(backups)
+        for target, temp_path in staged.items():
+            if target.exists() and not force:
+                raise InstallError(f"Target appeared during installation: {target}")
+            if target.is_symlink():
+                raise InstallError(f"Refusing to replace a symbolic-link target: {target}")
+            os.replace(temp_path, target)
+            replaced.append(target)
+            os.chmod(target, 0o600)
+        return backups
+    except BaseException:
+        for target in reversed(replaced):
+            backup = dict(backups).get(target)
+            try:
+                if backup is not None:
+                    restore_temp = stage_file(target, backup.read_bytes())
+                    os.replace(restore_temp, target)
+                    os.chmod(target, 0o600)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                # Preserve the original exception; the backup remains available for manual recovery.
+                pass
+        raise
+    finally:
+        for temp_path in staged.values():
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def backup_existing(paths: list[Path]) -> list[tuple[Path, Path]]:
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backups = []
+    for path in paths:
+        if not path.exists():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise InstallError(f"Refusing to replace a non-regular target: {path}")
+        backup = path.with_name(f"{path.name}.{stamp}.bak")
+        if backup.exists() or backup.is_symlink():
+            raise InstallError(f"Backup path already exists: {backup}")
+        shutil.copyfile(path, backup)
+        os.chmod(backup, 0o600)
+        backups.append((path, backup))
+    return backups
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="write profile and generated catalog")
+    parser.add_argument("--force", action="store_true", help="back up and replace existing targets")
+    parser.add_argument("--code-home", help="absolute Codex home (defaults to CODEX_HOME or ~/.codex)")
+    args = parser.parse_args()
+
+    if args.force and not args.apply:
+        parser.error("--force requires --apply")
+    os.umask(0o077)
+    codex = shutil.which("codex")
+    if not codex:
+        raise InstallError("codex was not found on PATH.")
+    if not PROFILE_TEMPLATE.is_file():
+        raise InstallError("The profile template is missing from this repository.")
+
+    if args.code_home is not None and not args.code_home.strip():
+        raise InstallError("--code-home must not be empty.")
+    env_home = os.environ.get("CODEX_HOME")
+    if args.code_home is None and env_home == "":
+        raise InstallError("CODEX_HOME is set to an empty value; unset it or provide --code-home.")
+    configured_home = Path(args.code_home) if args.code_home is not None else Path(env_home or (Path.home() / ".codex"))
+    home = configured_home.expanduser()
+    if not home.is_absolute():
+        raise InstallError("Codex home must be an absolute path; relative paths are refused.")
+    if home.is_symlink():
+        raise InstallError("Refusing to install into a symbolic-link CODEX_HOME.")
+    catalog_path = home / CATALOG_NAME
+    profile_path = home / PROFILE_NAME
+    targets = [catalog_path, profile_path]
+    existing = [path for path in targets if path.exists() or path.is_symlink()]
+    if existing and args.apply and not args.force:
+        listed = ", ".join(str(path) for path in existing)
+        raise InstallError(f"Target already exists; nothing was changed: {listed}. Use --apply --force to back up and replace.")
+    if any(path.is_symlink() for path in existing):
+        raise InstallError("Refusing to replace a symbolic-link target.")
+
+    catalog = add_luna_ultra(read_catalog(codex))
+    catalog_text = json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
+    profile_text = PROFILE_TEMPLATE.read_text(encoding="utf-8")
+    verify_profile(profile_text, catalog_text, codex)
+
+    if not args.apply:
+        print("Validated the current Codex catalog and Luna Ultra profile.")
+        if existing:
+            print("Would replace existing targets only with --apply --force (backups are created first):")
+        else:
+            print("Would write (mode 0600):")
+        for path in targets:
+            print(f"  {path}")
+        print("No files were changed. Re-run with --apply to install.")
+        return 0
+
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if home.is_symlink():
+        raise InstallError("Refusing to install into a symbolic-link CODEX_HOME.")
+    backups = transactional_write(
+        {
+            catalog_path: catalog_text.encode("utf-8"),
+            profile_path: profile_text.encode("utf-8"),
+        },
+        force=args.force,
+    )
+    if backups:
+        print("Backups created:")
+        for original, backup in backups:
+            print(f"  {original.name} -> {backup.name}")
+    print(f"Installed Luna Ultra profile and catalog under {home}.")
+    print("Start with: codex -p luna-ultra")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except InstallError as exc:
+        print(f"install: {exc}", file=sys.stderr)
+        raise SystemExit(1)

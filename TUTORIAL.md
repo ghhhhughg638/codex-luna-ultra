@@ -10,9 +10,16 @@ Install or configure Codex CLI first. The account/provider must already have acc
 
 先安装并配置 Codex CLI。账号和服务商必须已经有 GPT-6-Luna 访问权。本仓库不会提供模型、账号、服务商或登录凭据。
 
-Run the dependency check:
+Use the official Codex documentation for platform-specific installation and login:
 
-运行依赖检查：
+请先参考 Codex 官方文档完成对应平台的安装和登录：
+
+- https://developers.openai.com/codex/cli/
+- https://developers.openai.com/codex/quickstart/
+
+After cloning and entering this repository in the next section, run the dependency check:
+
+完成下一节的克隆并进入仓库后，运行依赖检查：
 
 ```sh
 python3 scripts/check_dependencies.py

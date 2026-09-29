@@ -5,6 +5,10 @@ This repository provides a portable Codex CLI profile and an installer that adds
 
 本仓库提供可移植的 Codex CLI profile，以及一个为**本地**模型目录添加 Luna `ultra` 选项的安装器。仓库不包含生成后的模型目录、个人 Codex 配置、认证信息或会话数据。
 
+Dependencies and the full step-by-step tutorial are in [DEPENDENCIES.md](DEPENDENCIES.md) and [TUTORIAL.md](TUTORIAL.md). The project can install the local profile and generated catalog; it cannot install Codex, GPT-6-Luna access, a provider, or credentials.
+
+依赖和完整分步教程见 [DEPENDENCIES.md](DEPENDENCIES.md) 与 [TUTORIAL.md](TUTORIAL.md)。项目可以安装本地 profile 和生成目录，但不能安装 Codex、GPT-6-Luna 访问权、服务商或认证信息。
+
 ## What Ultra means / Ultra 的含义
 
 The installer adds `ultra` to Luna's local reasoning menu and sets `multi_agent_reasoning_effort` to `max`. The profile requests root reasoning effort `ultra` and sets default subagents to Luna `max`. This local catalog entry cannot grant provider-side model support; exact root `ultra` behavior depends on the configured provider. If the provider rejects it, select `max` instead.

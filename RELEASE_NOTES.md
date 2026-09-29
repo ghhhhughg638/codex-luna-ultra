@@ -1,4 +1,6 @@
-# v1.0.0 — Codex Luna Ultra / Codex Luna Ultra 配置
+# v1.1.0 — Dependencies and tutorial / 依赖与完整教程
+
+This release adds dependency checks and a complete bilingual installation guide. / 本版本新增依赖检查和完整双语安装教程。
 
 ## 中文
 

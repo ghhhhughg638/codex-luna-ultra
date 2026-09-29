@@ -1,0 +1,2 @@
+# No third-party Python packages are required.
+# Python 3.9+ standard library is sufficient.

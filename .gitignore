@@ -19,3 +19,5 @@ memories_*.sqlite*
 *.log
 tmp/
 .codex/
+__pycache__/
+*.py[cod]

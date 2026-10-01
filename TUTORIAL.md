@@ -64,9 +64,23 @@ Use an explicit absolute Codex home when needed:
 python3 scripts/install.py --apply --code-home /absolute/path/to/.codex
 ```
 
-The installer creates only `luna-ultra-models.json` and `luna-ultra.config.toml`, mode `0600`. It obtains the current catalog in an isolated temporary home, adds Luna Ultra, and does not copy credentials or edit the base config.
+The profile workflow creates only `luna-ultra-models.json` and `luna-ultra.config.toml`, mode `0600`. Desktop mode additionally updates `config.toml` to point the Windows app at the local catalog. The installer obtains the current catalog in an isolated temporary home, adds Luna Ultra, and does not copy credentials or edit trust, instruction, or session state.
 
-安装器只创建权限 `0600` 的 `luna-ultra-models.json` 和 `luna-ultra.config.toml`。它在隔离临时 home 中获取当前目录、添加 Luna Ultra，不会复制凭据或修改基础配置。
+注意：profile 流程只创建权限 `0600` 的 `luna-ultra-models.json` 和 `luna-ultra.config.toml`。桌面模式会额外更新 `config.toml`，让 Windows 桌面版指向本地目录。安装器在隔离临时 home 中获取当前目录、添加 Luna Ultra，不会复制凭据，也不会修改信任、指令或会话状态。
+
+### Windows Codex desktop / Windows Codex 桌面版
+
+The desktop app does not select the CLI profile automatically. Use the explicit desktop mode to merge the generated catalog into the global config:
+
+桌面版不会自动选择 CLI profile。请使用显式桌面模式，将生成的目录合并到全局配置：
+
+```powershell
+python scripts/install.py --apply --desktop --force
+```
+
+The command backs up existing `config.toml`, profile, and catalog files, then adds `model_catalog_json` and `features.multi_agent`. Fully exit and restart Codex before checking More Reasoning for `ultra`.
+
+该命令会备份已有的 `config.toml`、profile 和目录文件，然后加入 `model_catalog_json` 与 `features.multi_agent`。请完全退出并重启 Codex，再到 More Reasoning 中检查 `ultra`。
 
 If the targets already exist, preview first and then use `--force` to update. Backups are created before replacement:
 

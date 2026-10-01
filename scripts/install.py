@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a local Luna Ultra profile without modifying base Codex settings."""
+"""Install a local Luna Ultra profile with optional desktop Codex integration."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import stat
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE_TEMPLATE = ROOT / "profiles" / "luna-ultra.config.toml"
 CATALOG_NAME = "luna-ultra-models.json"
 PROFILE_NAME = "luna-ultra.config.toml"
+CONFIG_NAME = "config.toml"
 ULTRA_DESCRIPTION = "Maximum reasoning with configured multi-agent support"
 
 
@@ -168,6 +170,67 @@ def verify_profile(profile_text: str, catalog_text: str, codex: str) -> None:
             raise InstallError("Profile validation returned unexpected output; no files were written.") from exc
 
 
+def merge_desktop_config(config_text: str) -> str:
+    """Add the local catalog and multi-agent flag without rewriting other settings."""
+    newline = "\r\n" if "\r\n" in config_text else "\n"
+    had_trailing_newline = config_text.endswith(("\n", "\r"))
+    lines = config_text.splitlines()
+
+    def section_end(start: int) -> int:
+        for index in range(start + 1, len(lines)):
+            stripped = lines[index].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                return index
+        return len(lines)
+
+    root_end = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            root_end = index
+            break
+
+    catalog_setting = f'model_catalog_json = "{CATALOG_NAME}"'
+    catalog_matches = [
+        index
+        for index in range(root_end)
+        if re.match(r"^\s*model_catalog_json\s*=", lines[index])
+    ]
+    if len(catalog_matches) > 1:
+        raise InstallError("config.toml has duplicate root model_catalog_json settings; no files were written.")
+    if catalog_matches:
+        lines[catalog_matches[0]] = catalog_setting
+    else:
+        lines.insert(root_end, catalog_setting)
+
+    feature_header = next(
+        (index for index, line in enumerate(lines) if line.strip() == "[features]"),
+        None,
+    )
+    if feature_header is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(["[features]", "multi_agent = true"])
+    else:
+        feature_end = section_end(feature_header)
+        feature_matches = [
+            index
+            for index in range(feature_header + 1, feature_end)
+            if re.match(r"^\s*multi_agent\s*=", lines[index])
+        ]
+        if len(feature_matches) > 1:
+            raise InstallError("config.toml has duplicate features.multi_agent settings; no files were written.")
+        if feature_matches:
+            lines[feature_matches[0]] = "multi_agent = true"
+        else:
+            lines.insert(feature_header + 1, "multi_agent = true")
+
+    merged = newline.join(lines)
+    if had_trailing_newline or not config_text:
+        merged += newline
+    return merged
+
+
 def stage_file(path: Path, content: bytes) -> Path:
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temp_path = Path(temp_name)
@@ -293,6 +356,11 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="write profile and generated catalog")
     parser.add_argument("--force", action="store_true", help="back up and replace existing targets")
     parser.add_argument("--code-home", help="absolute Codex home (defaults to CODEX_HOME or ~/.codex)")
+    parser.add_argument(
+        "--desktop",
+        action="store_true",
+        help="also wire the generated catalog into the Windows Codex desktop config",
+    )
     args = parser.parse_args()
 
     if args.force and not args.apply:
@@ -317,13 +385,27 @@ def main() -> int:
         raise InstallError("Refusing to install into a symbolic-link CODEX_HOME.")
     catalog_path = home / CATALOG_NAME
     profile_path = home / PROFILE_NAME
+    config_path = home / CONFIG_NAME
     targets = [catalog_path, profile_path]
+    if args.desktop:
+        targets.append(config_path)
     existing = [path for path in targets if path.exists() or path.is_symlink()]
     if existing and args.apply and not args.force:
         listed = ", ".join(str(path) for path in existing)
         raise InstallError(f"Target already exists; nothing was changed: {listed}. Use --apply --force to back up and replace.")
     if any(path.is_symlink() for path in existing):
         raise InstallError("Refusing to replace a symbolic-link target.")
+    if any(path.exists() and not path.is_file() for path in existing):
+        raise InstallError("Refusing to replace a non-regular installation target.")
+
+    desktop_config_text = ""
+    if args.desktop and config_path.exists():
+        try:
+            desktop_config_text = merge_desktop_config(config_path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError as exc:
+            raise InstallError("config.toml is not valid UTF-8; no files were written.") from exc
+    elif args.desktop:
+        desktop_config_text = merge_desktop_config("")
 
     catalog = add_luna_ultra(read_catalog(codex))
     catalog_text = json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
@@ -338,25 +420,31 @@ def main() -> int:
             print("Would write (mode 0600):")
         for path in targets:
             print(f"  {path}")
+        if args.desktop:
+            print("Desktop mode would add model_catalog_json and features.multi_agent to config.toml.")
         print("No files were changed. Re-run with --apply to install.")
         return 0
 
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
     if home.is_symlink():
         raise InstallError("Refusing to install into a symbolic-link CODEX_HOME.")
-    backups = transactional_write(
-        {
-            catalog_path: catalog_text.encode("utf-8"),
-            profile_path: profile_text.encode("utf-8"),
-        },
-        force=args.force,
-    )
+    files = {
+        catalog_path: catalog_text.encode("utf-8"),
+        profile_path: profile_text.encode("utf-8"),
+    }
+    if args.desktop:
+        files[config_path] = desktop_config_text.encode("utf-8")
+    backups = transactional_write(files, force=args.force)
     if backups:
         print("Backups created:")
         for original, backup in backups:
             print(f"  {original.name} -> {backup.name}")
     print(f"Installed Luna Ultra profile and catalog under {home}.")
-    print("Start with: codex -p luna-ultra")
+    if args.desktop:
+        print(f"Updated desktop Codex config: {config_path}")
+        print("Restart the Codex desktop app before using the Luna Ultra menu.")
+    else:
+        print("Start with: codex -p luna-ultra")
     return 0
 
 

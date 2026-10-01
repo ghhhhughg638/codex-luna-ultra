@@ -21,9 +21,9 @@ The generated catalog contains the installed Codex model entries and built-in mo
 
 ## Install / 安装
 
-Requirements: Codex CLI with `codex debug models` and a Luna model entry advertising multi-agent v2, Python 3, and a POSIX shell. Native Windows is not supported by this installer; use WSL2. Provider access/authentication is needed to run Luna requests, not to generate the local profile/catalog. The current format was validated with Codex CLI 0.156.1 on Termux; the installer stops when required catalog fields are incompatible or Codex rejects the generated profile.
+Requirements: Codex CLI with `codex debug models` and a Luna model entry advertising multi-agent v2, plus Python 3. The profile workflow uses a POSIX shell; the Windows Codex desktop workflow runs directly from PowerShell with `--desktop`. Provider access/authentication is needed to run Luna requests, not to generate the local profile/catalog. The current format was validated with Codex CLI 0.156.1 on Termux and Codex desktop 26.917; the installer stops when required catalog fields are incompatible or Codex rejects the generated profile.
 
-要求：支持 `codex debug models` 且 Luna 模型条目标记多智能体 v2 的 Codex CLI、Python 3 和 POSIX shell。安装器不支持原生 Windows，请使用 WSL2。实际调用 Luna 请求需要服务商访问权和认证；生成本地 profile/目录不需要。当前格式已在 Termux 的 Codex CLI 0.156.1 上验证；必需目录字段不兼容或 Codex 拒绝生成的 profile 时，安装器会停止。
+要求：支持 `codex debug models` 且 Luna 模型条目标记多智能体 v2 的 Codex CLI，以及 Python 3。profile 流程使用 POSIX shell；Windows Codex 桌面版可在 PowerShell 中直接使用 `--desktop`。实际调用 Luna 请求需要服务商访问权和认证；生成本地 profile/目录不需要。当前格式已在 Codex CLI 0.156.1 和 Codex 桌面版 26.917 上验证；必需目录字段不兼容或 Codex 拒绝生成的 profile 时，安装器会停止。
 
 1. Clone this repository.
 2. Enter the repository directory:
@@ -50,6 +50,18 @@ Requirements: Codex CLI with `codex debug models` and a Luna model entry adverti
    codex -p luna-ultra
    ```
 
+For the Windows Codex desktop app, install the catalog into the global desktop configuration:
+
+对于 Windows Codex 桌面版，将目录接入全局桌面配置：
+
+```powershell
+python scripts/install.py --apply --desktop --force
+```
+
+Desktop mode also writes `model_catalog_json = "luna-ultra-models.json"` and enables `features.multi_agent` in `$CODEX_HOME/config.toml`. Existing `config.toml`, profile, and catalog files are backed up before replacement. Fully exit and restart the Codex desktop app after installation; the catalog is loaded at startup.
+
+桌面模式还会在 `$CODEX_HOME/config.toml` 中写入 `model_catalog_json = "luna-ultra-models.json"` 并启用 `features.multi_agent`。替换前会备份已有的 `config.toml`、profile 和目录文件。安装后请完全退出并重新打开 Codex 桌面版；目录会在启动时加载。
+
 1. 克隆本仓库。
 2. 进入仓库目录：
 
@@ -75,9 +87,9 @@ Requirements: Codex CLI with `codex debug models` and a Luna model entry adverti
    codex -p luna-ultra
    ```
 
-On a fresh install, the installer writes only `luna-ultra-models.json` and `luna-ultra.config.toml` under `$CODEX_HOME` (usually `~/.codex`). It obtains a fresh catalog using a temporary isolated Codex home, validates the Luna entry, and preserves all other model entries. It does not edit `config.toml`, authentication, trust settings, `AGENTS.md`, or session state. Existing target files are never overwritten unless `--force` is supplied; forced updates also create timestamped, permission-restricted backup files first.
+On a fresh profile install, the installer writes only `luna-ultra-models.json` and `luna-ultra.config.toml` under `$CODEX_HOME` (usually `~/.codex`). Desktop mode additionally updates `config.toml` because the Windows app loads its catalog from the global config. The installer obtains a fresh catalog using a temporary isolated Codex home, validates the Luna entry, and preserves all other model entries. It never edits authentication, trust settings, `AGENTS.md`, or session state. Existing target files are never overwritten unless `--force` is supplied; forced updates also create timestamped, permission-restricted backup files first.
 
-首次安装时，安装器只会在 `$CODEX_HOME`（通常是 `~/.codex`）下写入 `luna-ultra-models.json` 和 `luna-ultra.config.toml`。它使用临时隔离的 Codex home 获取新目录，验证 Luna 条目并保留其他模型条目。它不会改动 `config.toml`、认证信息、信任设置、`AGENTS.md` 或会话状态。默认不会覆盖同名文件；只有使用 `--force` 才会更新，并会额外创建带时间戳、权限受限的备份文件。
+profile 首次安装时，安装器只会在 `$CODEX_HOME`（通常是 `~/.codex`）下写入 `luna-ultra-models.json` 和 `luna-ultra.config.toml`。桌面模式会额外更新 `config.toml`，因为 Windows 桌面版从全局配置加载目录。安装器使用临时隔离的 Codex home 获取新目录、验证 Luna 条目并保留其他模型条目；不会改动认证信息、信任设置、`AGENTS.md` 或会话状态。默认不会覆盖同名文件；只有使用 `--force` 才会更新，并会额外创建带时间戳、权限受限的备份文件。
 
 To use the deliberation policy globally, merge this repository's `AGENTS.md` into `$CODEX_HOME/AGENTS.md`; do not overwrite existing personal instructions. A project-local copy applies only to that project.
 
@@ -92,6 +104,14 @@ Codex 更新模型目录后，重新预览并应用：
 ```sh
 python3 scripts/install.py
 python3 scripts/install.py --apply --force
+```
+
+For the Windows desktop app, refresh with:
+
+Windows 桌面版更新目录时使用：
+
+```powershell
+python scripts/install.py --apply --desktop --force
 ```
 
 The source catalog is queried from the installed CLI in a clean temporary home. If the CLI output changes, the installer stops without writing files. Restart Codex after updating because `model_catalog_json` is loaded at startup.
@@ -116,9 +136,9 @@ python3 -m unittest discover -s tests -v
 
 ## Remove / 卸载
 
-Remove the two files created under `$CODEX_HOME`: `luna-ultra.config.toml` and `luna-ultra-models.json`. Restore a backup if you used `--force`. The installer does not modify the base config.
+Remove the two generated files under `$CODEX_HOME`: `luna-ultra.config.toml` and `luna-ultra-models.json`. If you used desktop mode, restore the backed-up `config.toml` or remove the two managed settings (`model_catalog_json` and `features.multi_agent`) after confirming they were not already present. Restore a backup if you used `--force`.
 
-删除 `$CODEX_HOME` 下安装器创建的两个文件：`luna-ultra.config.toml` 和 `luna-ultra-models.json`。如果使用了 `--force`，可按需恢复备份。安装器不会改动基础配置文件。
+删除 `$CODEX_HOME` 下生成的两个文件：`luna-ultra.config.toml` 和 `luna-ultra-models.json`。如果使用过桌面模式，请恢复备份的 `config.toml`，或确认这两个托管设置（`model_catalog_json` 与 `features.multi_agent`）之前不存在后再手动删除。如果使用了 `--force`，可按需恢复备份。
 
 ## License / 许可证
 

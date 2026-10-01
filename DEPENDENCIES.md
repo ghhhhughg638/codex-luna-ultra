@@ -13,16 +13,30 @@ Install or configure Codex CLI from the official documentation first:
 | --- | --- | --- |
 | Codex CLI | A version that provides `codex debug models`, `debug prompt-input`, and a Luna entry with `multi_agent_version = "v2"` and `max` | Supplies the local model catalog and loads the profile / 提供本地模型目录并加载 profile |
 | Python | Python 3.9 or newer | Runs the installer; it uses only the standard library / 运行安装器，仅使用标准库 |
-| Shell | POSIX-compatible shell for the documented commands | Runs the examples / 执行教程命令 |
+| Shell | POSIX-compatible shell for profile commands; PowerShell for the Windows desktop command | Runs the examples / 执行教程命令 |
 | Provider access for model use | An account/provider that already has GPT-6-Luna access and authentication | Needed to run model requests, not to generate the local files / 调用模型时需要，生成本地文件不需要 |
 
 `requirements.txt` is intentionally empty of third-party packages. No `pip install` step is needed.
 
 `requirements.txt` 没有第三方包，故不需要执行 `pip install`。
 
-The installer currently supports POSIX environments (Linux, macOS, Termux, and WSL2). Native Windows PowerShell is not supported; use WSL2 for the installer.
+The profile workflow is documented for POSIX environments (Linux, macOS, Termux, and WSL2). The Python installer also supports native Windows PowerShell when `--desktop` is used for the Codex desktop app.
 
-安装器目前支持 POSIX 环境（Linux、macOS、Termux 和 WSL2）。暂不支持原生 Windows PowerShell；Windows 用户请使用 WSL2。
+profile 流程面向 POSIX 环境（Linux、macOS、Termux 和 WSL2）。使用 Codex 桌面版时，Python 安装器也支持原生 Windows PowerShell 的 `--desktop` 模式。
+
+## Windows Codex desktop / Windows Codex 桌面版
+
+The desktop app loads its model catalog from the global `$CODEX_HOME/config.toml` at startup. Install the generated catalog and opt into the desktop merge explicitly:
+
+Windows 桌面版会在启动时从全局 `$CODEX_HOME/config.toml` 加载模型目录。请显式启用桌面合并：
+
+```powershell
+python scripts/install.py --apply --desktop --force
+```
+
+This creates a timestamped backup before updating `config.toml`, then adds the local catalog reference and `features.multi_agent = true`. Close and restart the desktop app after the command returns.
+
+该命令会在更新 `config.toml` 前创建带时间戳的备份，然后加入本地目录引用和 `features.multi_agent = true`。命令结束后请关闭并重新打开桌面版。
 
 ## Optional / 可选
 

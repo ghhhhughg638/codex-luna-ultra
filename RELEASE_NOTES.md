@@ -1,3 +1,21 @@
+# Unreleased — Windows Codex desktop integration / Windows Codex 桌面版接入
+
+## 中文
+
+- 新增可选的 `--desktop` 安装模式，接入 Windows Codex 桌面版的全局模型目录。
+- 安全合并 `model_catalog_json` 和 `features.multi_agent`，更新前备份已有配置、profile 和目录文件。
+- 更新中英文依赖、教程和刷新说明，明确桌面版需要完全重启才能加载目录。
+
+## English
+
+- Adds an opt-in `--desktop` installation mode for the Windows Codex desktop app's global model catalog.
+- Safely merges `model_catalog_json` and `features.multi_agent`, backing up existing config, profile, and catalog files before replacement.
+- Updates the bilingual dependency, tutorial, and refresh documentation with the required full desktop restart.
+
+## Capability boundary / 能力边界
+
+`ultra` remains a local catalog option. Provider acceptance of root Ultra and actual parallel-agent capacity depend on the configured provider, account, and Codex runtime. This project does not include the model, provider credentials, or model-service entitlement.
+
 # v1.2.0 — QA hardening and regression suite / 测试加固与回归套件
 
 ## 中文
